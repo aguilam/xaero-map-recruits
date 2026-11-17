@@ -3,6 +3,8 @@ package com.aguilam.xaerorecruits.claims;
 import com.aguilam.xaerorecruits.XaeroRecruitsMod;
 import com.talhanation.recruits.Main;
 import com.talhanation.recruits.client.ClientManager;
+import com.talhanation.recruits.client.gui.worldmap.WorldMapScreen;
+import com.talhanation.recruits.client.gui.worldmap.claim.ClaimEditScreen;
 import com.talhanation.recruits.network.MessageUpdateClaim;
 import com.talhanation.recruits.world.RecruitsClaim;
 import com.talhanation.recruits.world.RecruitsFaction;
@@ -18,6 +20,8 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import xaero.map.MapProcessor;
+import xaero.map.gui.GuiMap;
 import xaero.map.gui.IRightClickableElement;
 import xaero.map.gui.dropdown.rightclick.RightClickOption;
 
@@ -29,7 +33,7 @@ public final class MapClaimActions {
     private MapClaimActions() {
     }
 
-    public record ClaimOption(String nameKey, String reasonKey, Runnable action) {
+    public record ClaimOption(String nameKey, String reasonKey, Runnable action, int cost) {
         public boolean enabled() {
             return this.reasonKey == null && this.action != null;
         }
@@ -58,24 +62,39 @@ public final class MapClaimActions {
 
         ChunkPos selectedChunk = new ChunkPos(blockX >> 4, blockZ >> 4);
         ClaimIndex.Snapshot snapshot = ClaimIndex.get().getSnapshot();
+        RecruitsClaim clickedClaim = findClaimAt(selectedChunk);
+        if (clickedClaim != null) {
+            boolean manageable = canManageClaim(player, clickedClaim.getOwnerFaction(), clickedClaim);
+            options.add(new ClaimOption(
+                    "xaerorecruits.map_claim.edit",
+                    manageable ? null : "xaerorecruits.reason.no_permission",
+                    manageable ? () -> openClaimEdit(clickedClaim, player) : null,
+                    0
+            ));
+            return options;
+        }
         if (snapshot.hasChunk(selectedChunk.x, selectedChunk.z)) {
             return options;
         }
 
-        String areaReason = getAreaBlockReason(player, ownFaction, selectedChunk, snapshot);
+        int areaCost = getClaimAreaCost(ownFaction);
+        String areaReason = getAreaBlockReason(player, ownFaction, selectedChunk, snapshot, areaCost);
         options.add(new ClaimOption(
                 "xaerorecruits.map_claim.area",
                 areaReason,
-                areaReason == null ? () -> sendAreaClaim(player, selectedChunk) : null
+                areaReason == null ? () -> sendAreaClaim(player, selectedChunk) : null,
+                areaCost
         ));
 
         RecruitsClaim neighborClaim = findAdjacentOwnClaim(selectedChunk, ownFaction);
         if (neighborClaim != null) {
-            String expandReason = getExpansionBlockReason(player, ownFaction, neighborClaim, selectedChunk, snapshot);
+            int expandCost = Math.max(0, ClientManager.configValueChunkCost);
+            String expandReason = getExpansionBlockReason(player, ownFaction, neighborClaim, selectedChunk, snapshot, expandCost);
             options.add(new ClaimOption(
                     "xaerorecruits.map_claim.expand",
                     expandReason,
-                    expandReason == null ? () -> sendExpansion(neighborClaim, selectedChunk) : null
+                    expandReason == null ? () -> sendExpansion(neighborClaim, selectedChunk) : null,
+                    expandCost
             ));
         }
         return options;
@@ -84,38 +103,58 @@ public final class MapClaimActions {
     public static void addOptions(ArrayList<RightClickOption> options, IRightClickableElement target,
                                   int blockX, int blockZ, ResourceKey<Level> dimension) {
         for (ClaimOption option : getOptions(blockX, blockZ, dimension)) {
-            if (option.enabled()) {
-                options.add(createAction(option.nameKey(), options.size(), target, option.action()));
-            } else {
-                options.add(createBlockedOption(option.nameKey(), option.reasonKey(), options.size(), target));
-            }
+            options.add(option.enabled()
+                    ? createAction(option, options.size(), target)
+                    : createBlockedOption(option, options.size(), target));
         }
     }
 
-    private static RightClickOption createAction(String nameKey, int index, IRightClickableElement target,
-                                                 Runnable action) {
-        return new RightClickOption(nameKey, index, target) {
-            @Override
-            public void onAction(Screen screen) {
-                action.run();
-            }
-        };
+    public static boolean hasPrice(RightClickOption option) {
+        return option instanceof ClaimRightClickOption;
     }
 
-    private static RightClickOption createBlockedOption(String nameKey, String reasonKey, int index,
-                                                        IRightClickableElement target) {
-        RightClickOption option = new RightClickOption(nameKey, index, target) {
-            @Override
-            public void onAction(Screen screen) {
+    private static RightClickOption createAction(ClaimOption option, int index, IRightClickableElement target) {
+        return new ClaimRightClickOption(option, index, target);
+    }
+
+    private static RightClickOption createBlockedOption(ClaimOption option, int index, IRightClickableElement target) {
+        ClaimRightClickOption clickOption = new ClaimRightClickOption(option, index, target);
+        clickOption.setActive(false);
+        clickOption.setNameFormatArgs(Component.translatable(option.reasonKey()));
+        return clickOption;
+    }
+
+    private static final class ClaimRightClickOption extends RightClickOption {
+        private final Runnable action;
+        private final int cost;
+
+        private ClaimRightClickOption(ClaimOption option, int index, IRightClickableElement target) {
+            super(option.nameKey(), index, target);
+            this.action = option.action();
+            this.cost = option.cost();
+        }
+
+        @Override
+        public void onAction(Screen screen) {
+            if (action != null) {
+                action.run();
             }
-        };
-        option.setActive(false);
-        option.setNameFormatArgs(Component.translatable(reasonKey));
-        return option;
+        }
+
+        @Override
+        public Component getDisplayName() {
+            Component name = super.getDisplayName();
+            ItemStack currency = ClientManager.currencyItemStack;
+            if (cost <= 0 || currency == null || currency.isEmpty()) {
+                return name;
+            }
+            return Component.empty().append(name).append(Component.translatable(
+                    "xaerorecruits.map_claim.price", cost, currency.getHoverName()).withStyle(name.getStyle()));
+        }
     }
 
     private static String getAreaBlockReason(Player player, RecruitsFaction ownFaction, ChunkPos center,
-                                             ClaimIndex.Snapshot snapshot) {
+                                             ClaimIndex.Snapshot snapshot, int cost) {
         if (isTooFar(player, center)) {
             return "xaerorecruits.reason.too_far";
         }
@@ -138,7 +177,7 @@ public final class MapClaimActions {
                 return "xaerorecruits.reason.buffer";
             }
         }
-        if (!canPlayerPay(getClaimAreaCost(ownFaction), player)) {
+        if (!canPlayerPay(cost, player)) {
             return "xaerorecruits.reason.no_payment";
         }
         return null;
@@ -146,7 +185,7 @@ public final class MapClaimActions {
 
     private static String getExpansionBlockReason(Player player, RecruitsFaction ownFaction,
                                                   RecruitsClaim neighborClaim, ChunkPos selectedChunk,
-                                                  ClaimIndex.Snapshot snapshot) {
+                                                  ClaimIndex.Snapshot snapshot, int cost) {
         if (isTooFar(player, selectedChunk)) {
             return "xaerorecruits.reason.too_far";
         }
@@ -163,7 +202,7 @@ public final class MapClaimActions {
         if (isInBufferZone(selectedChunk, ownFaction)) {
             return "xaerorecruits.reason.buffer";
         }
-        if (!canPlayerPay(Math.max(0, ClientManager.configValueChunkCost), player)) {
+        if (!canPlayerPay(cost, player)) {
             return "xaerorecruits.reason.no_payment";
         }
         return null;
@@ -201,6 +240,26 @@ public final class MapClaimActions {
             sendClaim(neighborClaim);
         } catch (Throwable throwable) {
             XaeroRecruitsMod.LOGGER.warn("Could not send the claim expansion request", throwable);
+        }
+    }
+
+    private static void openClaimEdit(RecruitsClaim claim, Player player) {
+        try {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (!(minecraft.screen instanceof GuiMap map)) {
+                minecraft.setScreen(new ClaimEditScreen(null, claim, player));
+                return;
+            }
+            MapProcessor processor = map.getMapProcessor();
+            WorldMapScreen parent = new WorldMapScreen() {
+                @Override
+                protected void init() {
+                    Minecraft.getInstance().setScreen(new GuiMap(null, null, processor, Minecraft.getInstance().getCameraEntity()));
+                }
+            };
+            minecraft.setScreen(new ClaimEditScreen(parent, claim, player));
+        } catch (Throwable throwable) {
+            XaeroRecruitsMod.LOGGER.warn("Could not open the claim edit screen", throwable);
         }
     }
 

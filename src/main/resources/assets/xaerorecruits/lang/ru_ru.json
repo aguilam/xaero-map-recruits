@@ -1,6 +1,8 @@
 {
-  "xaerorecruits.map_claim.area": "Захватить область 5x5",
-  "xaerorecruits.map_claim.expand": "Расширить территорию на 1 чанк",
+  "xaerorecruits.map_claim.area": "Захватить Территорию",
+  "xaerorecruits.map_claim.expand": "Захватить Чанк",
+  "xaerorecruits.map_claim.edit": "Настроить Территорию",
+  "xaerorecruits.map_claim.price": " (%s× %s)",
   "xaerorecruits.reason.too_far": "слишком далеко",
   "xaerorecruits.reason.no_permission": "нет прав",
   "xaerorecruits.reason.claim_full": "территория заполнена",

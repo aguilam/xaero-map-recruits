@@ -15,8 +15,8 @@ public final class MinimapClaimHighlighter extends ChunkHighlighter {
         super(true);
     }
 
-    private static boolean minimapVisible() {
-        return XRConfig.CLIENT.showClaims.get() && XRConfig.CLIENT.showOnMinimap.get();
+    private static boolean claimsVisible() {
+        return XRConfig.CLIENT.showClaims.get();
     }
 
     @Override
@@ -26,7 +26,7 @@ public final class MinimapClaimHighlighter extends ChunkHighlighter {
 
     @Override
     protected int[] getColors(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        if (!minimapVisible()) {
+        if (!claimsVisible()) {
             return null;
         }
 
@@ -62,7 +62,7 @@ public final class MinimapClaimHighlighter extends ChunkHighlighter {
     @Override
     public void addChunkHighlightTooltips(InfoDisplayCompiler compiler, ResourceKey<Level> dimension, int chunkX, int chunkZ,
                                           int width) {
-        if (!minimapVisible()) {
+        if (!claimsVisible() || !XRConfig.CLIENT.showMinimapInfo.get()) {
             return;
         }
 

@@ -3,6 +3,7 @@ package com.aguilam.xaerorecruits.claims;
 import com.aguilam.xaerorecruits.XaeroRecruitsMod;
 import com.talhanation.recruits.Main;
 import com.talhanation.recruits.client.ClientManager;
+import com.talhanation.recruits.client.gui.diplomacy.DiplomacyEditScreen;
 import com.talhanation.recruits.client.gui.worldmap.WorldMapScreen;
 import com.talhanation.recruits.client.gui.worldmap.claim.ClaimEditScreen;
 import com.talhanation.recruits.network.MessageUpdateClaim;
@@ -64,6 +65,15 @@ public final class MapClaimActions {
         ClaimIndex.Snapshot snapshot = ClaimIndex.get().getSnapshot();
         RecruitsClaim clickedClaim = findClaimAt(selectedChunk);
         if (clickedClaim != null) {
+            RecruitsFaction owner = clickedClaim.getOwnerFaction();
+            if (owner != null && !Objects.equals(ownFaction.getStringID(), clickedClaim.getOwnerFactionStringID())) {
+                options.add(new ClaimOption(
+                        "xaerorecruits.map_claim.diplomacy",
+                        null,
+                        () -> openDiplomacy(owner),
+                        0
+                ));
+            }
             boolean manageable = canManageClaim(player, clickedClaim.getOwnerFaction(), clickedClaim);
             options.add(new ClaimOption(
                     "xaerorecruits.map_claim.edit",
@@ -245,22 +255,32 @@ public final class MapClaimActions {
 
     private static void openClaimEdit(RecruitsClaim claim, Player player) {
         try {
-            Minecraft minecraft = Minecraft.getInstance();
-            if (!(minecraft.screen instanceof GuiMap map)) {
-                minecraft.setScreen(new ClaimEditScreen(null, claim, player));
-                return;
-            }
-            MapProcessor processor = map.getMapProcessor();
-            WorldMapScreen parent = new WorldMapScreen() {
-                @Override
-                protected void init() {
-                    Minecraft.getInstance().setScreen(new GuiMap(null, null, processor, Minecraft.getInstance().getCameraEntity()));
-                }
-            };
-            minecraft.setScreen(new ClaimEditScreen(parent, claim, player));
+            Minecraft.getInstance().setScreen(new ClaimEditScreen(mapReturnParent(), claim, player));
         } catch (Throwable throwable) {
             XaeroRecruitsMod.LOGGER.warn("Could not open the claim edit screen", throwable);
         }
+    }
+
+    private static void openDiplomacy(RecruitsFaction faction) {
+        try {
+            Minecraft.getInstance().setScreen(new DiplomacyEditScreen(mapReturnParent(), faction));
+        } catch (Throwable throwable) {
+            XaeroRecruitsMod.LOGGER.warn("Could not open the diplomacy screen", throwable);
+        }
+    }
+
+    private static WorldMapScreen mapReturnParent() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (!(minecraft.screen instanceof GuiMap map)) {
+            return null;
+        }
+        MapProcessor processor = map.getMapProcessor();
+        return new WorldMapScreen() {
+            @Override
+            protected void init() {
+                Minecraft.getInstance().setScreen(new GuiMap(null, null, processor, Minecraft.getInstance().getCameraEntity()));
+            }
+        };
     }
 
     private static void sendClaim(RecruitsClaim claim) {
@@ -318,9 +338,12 @@ public final class MapClaimActions {
         return null;
     }
 
-    private static RecruitsClaim findClaimAt(ChunkPos chunk) {
-        List<RecruitsClaim> claims = new ArrayList<>(ClientManager.recruitsClaims);
-        for (RecruitsClaim claim : claims) {
+    public static RecruitsClaim findClaimAt(ChunkPos chunk) {
+        List<RecruitsClaim> claims = ClientManager.recruitsClaims;
+        if (claims == null) {
+            return null;
+        }
+        for (RecruitsClaim claim : new ArrayList<>(claims)) {
             if (claim == null || claim.isRemoved || claim.getClaimedChunks() == null) {
                 continue;
             }
